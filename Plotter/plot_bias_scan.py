@@ -29,20 +29,25 @@ colors = [1,2001,2002,2003,2004,2005,2006,2,3,4,6,7,5,1,8,9,29,38,46]
 
 standard_pd_signal = 35. #mV
 
-def plot_single_scan(scan_num,graph,graph_pd,graph_norm,graph_temp,name,temp):
+def plot_single_scan(scan_num,graph,graph_pd,graph_norm,graph_temp,graph_norm_lgadbias,graph_current_lgadbias, name,temp):
 	cosmetic_tgraph(graph,3)
 	cosmetic_tgraph(graph_pd,2)
 	cosmetic_tgraph(graph_norm,4)
 	cosmetic_tgraph(graph_temp,1)
+	cosmetic_tgraph(graph_norm_lgadbias,5)
+	cosmetic_tgraph(graph_current_lgadbias,6)
 
 	c = ROOT.TCanvas()
 	c.SetGridy()
 	c.SetGridx()
 	mgraph = ROOT.TMultiGraph()
-	mgraph.Add(graph)
 	mgraph.Add(graph_pd)
-	mgraph.Add(graph_norm)
 	mgraph.Add(graph_temp)
+	mgraph.Add(graph_current_lgadbias)
+	mgraph.Add(graph)
+	mgraph.Add(graph_norm)
+	mgraph.Add(graph_norm_lgadbias)
+
 	mgraph.SetTitle("; Bias voltage [V]; Average laser response [mV]")
 	# graph.Draw("AELP")
 	# graph_pd.Draw("ELP same")
@@ -53,13 +58,20 @@ def plot_single_scan(scan_num,graph,graph_pd,graph_norm,graph_temp,name,temp):
 	leg = ROOT.TLegend(0.2,0.7,0.59,0.89)
 	leg.SetMargin(0.15)
 	leg.AddEntry(graph_pd, "Photodiode","EP")
+	leg.AddEntry(graph_temp, "Measured temperature [C]","EP")
+	leg.AddEntry(graph_current_lgadbias, "Current [#muA]","EP")
 	leg.AddEntry(graph, "%s, %i C" % (name,temp),"EP")
 	leg.AddEntry(graph_norm, "%s, %i C, norm."%(name,temp),"EP")
-	leg.AddEntry(graph_temp, "Measured temperature [C]","EP")
+	leg.AddEntry(graph_norm_lgadbias, "%s, corrected LGAD bias"%name,"EP")
+	
 	leg.Draw()
 	c.Print("plots/scan%i.pdf"%scan_num)
 
-def plot_overlay(outfile,names,temps,series_num):
+def plot_overlay(outfile,names,temps,series_num,plottype):
+	if plottype==1: filename = "gr"
+	if plottype==2: filename = "grlgad"
+	if plottype==3: filename = "griv"
+
 	c = ROOT.TCanvas()
 	c.SetGridy()
 	c.SetGridx()
@@ -69,15 +81,18 @@ def plot_overlay(outfile,names,temps,series_num):
 	leg.SetMargin(0.15)
 
 	for i,scan in enumerate(scan_nums):
-		graph = outFile.Get("gr%i"%scan)
+		graph = outFile.Get(filename+str(scan))
 	 	cosmetic_tgraph(graph,i)
 		mgraph.Add(graph)
 	 	leg.AddEntry(graph, "%s, %i C" %(names[i],temps[i]),"EP")
 
-	graph.SetTitle("; Bias voltage [V]; Average laser response [mV]")
+	mgraph.SetTitle("; Bias voltage [V]; Average laser response [mV]")
+	if plottype==3: mgraph.SetTitle("; Bias voltage [V]; Current [#muA]")
 	mgraph.Draw("AELP")
 	leg.Draw()
-	c.Print("plots/series%i.pdf"%series_num)
+	if plottype==1: c.Print("plots/series%i.pdf"%series_num)
+	if plottype==2: c.Print("plots/series%i_corr.pdf"%series_num)
+	if plottype==3: c.Print("plots/series%i_IV.pdf"%series_num)
 
 
 
@@ -106,7 +121,7 @@ def get_mean_response(tree):
 	best_chan = means_this_run.index(best_mean)	
 	err = errs_this_run[best_chan]
 
-	print best_mean,err,best_chan
+	#print best_mean,err,best_chan
 
 	return best_mean,err
 
@@ -115,6 +130,7 @@ def get_scan_results(scan_num):
 	runs=[]
 	biases=[]
 	biases_meas=[]
+	lgad_biases=[]
 	currents_meas=[]
 	temps =[] 
 	
@@ -127,14 +143,17 @@ def get_scan_results(scan_num):
 	mean_responses_norm=[]
 	err_responses_norm=[]
 
-	scan_txt_filename = "/home/daq/BiasScan/VoltageScanDataRegistry/scan%i.txt" % scan_num
+	scan_txt_filename = "/home/daq/BiasScan/LBSF/VoltageScanDataRegistry/scan%i.txt" % scan_num
 	with open(scan_txt_filename) as scan_txt_file:
 		for line in scan_txt_file:
 			if line[:1] == "#": continue
 			runs.append(int(line.split("\t")[0]))		
-			biases.append(abs(float(line.split("\t")[1])))
+		 	biases.append(abs(float(line.split("\t")[1])))
 			biases_meas.append(abs(float(line.split("\t")[2])))
-			currents_meas.append(abs(float(line.split("\t")[3])))
+			currents_meas.append(1.e6*abs(float(line.split("\t")[3]))) ## convert to microamps
+
+			lgad_biases.append(biases[-1] - 1.1 * currents_meas[-1]) ## 1.1 MOhm in series with LGAD
+
 			temps.append(float(line.split("\t")[4]))
 
 			if biases[-1]>0 and abs(biases_meas[-1]-biases[-1])/biases[-1] > 0.1:
@@ -150,7 +169,7 @@ def get_scan_results(scan_num):
 		##photodiode
 		mean_pd,err_pd = get_mean_response_channel(tree,18) 
 	
-		print mean_pd
+		#print mean_pd
 		##normalized results
 		if mean_pd > 0:
 			mean_responses_norm.append( mean * standard_pd_signal/mean_pd )
@@ -175,10 +194,15 @@ def get_scan_results(scan_num):
 	graph = ROOT.TGraphErrors(len(biases),array("d",biases),array("d",mean_responses),array("d",[1 for i in biases]),array("d",err_responses))
 	graph_pd = ROOT.TGraphErrors(len(biases),array("d",biases),array("d",mean_photodiode),array("d",[1 for i in biases]),array("d",err_photodiode))
 	graph_norm = ROOT.TGraphErrors(len(biases),array("d",biases),array("d",mean_responses_norm),array("d",[1 for i in biases]),array("d",err_responses_norm))
+	graph_norm_lgadbias = ROOT.TGraphErrors(len(biases),array("d",lgad_biases),array("d",mean_responses_norm),array("d",[1 for i in biases]),array("d",err_responses_norm))
+	graph_current_lgadbias = ROOT.TGraphErrors(len(biases),array("d",lgad_biases),array("d",currents_meas),array("d",[1 for i in biases]),array("d",[1 for i in biases]))
+
 	graph_temp = ROOT.TGraphErrors(len(biases),array("d",biases),array("d",temps),array("d",[1 for i in biases]),array("d",[0.1 for i in biases]))
 	graph_norm.SetName("gr%i"%scan_num)
+	graph_norm_lgadbias.SetName("grlgad%i"%scan_num)
+	graph_current_lgadbias.SetName("griv%i"%scan_num)
 	#mgraph.Add(graph_norm)
-	return graph,graph_pd,graph_norm,graph_temp
+	return graph,graph_pd,graph_norm,graph_temp,graph_norm_lgadbias,graph_current_lgadbias
 	
 
 
@@ -198,15 +222,18 @@ with open(series_txt_filename) as series_txt_file:
 			names.append(line.split(",")[1])
 			temps.append(int(line.split(",")[2]))
 
-print scan_nums
 
 outFile = ROOT.TFile("buffer.root","RECREATE")
 for i,scan_num in enumerate(scan_nums):
-	graph,graph_pd,graph_norm,graph_temp = get_scan_results(scan_num)
+	graph,graph_pd,graph_norm,graph_temp,graph_norm_lgadbias,graph_current_lgadbias = get_scan_results(scan_num)
 	graph_norm.Write()
-	plot_single_scan(scan_num,graph,graph_pd,graph_norm,graph_temp,names[i],temps[i])
+	graph_norm_lgadbias.Write()
+	graph_current_lgadbias.Write()
+	plot_single_scan(scan_num,graph,graph_pd,graph_norm,graph_temp,graph_norm_lgadbias,graph_current_lgadbias,names[i],temps[i])
 
 
 outFile.Save()
 
-plot_overlay(outFile,names,temps,series_num)
+plot_overlay(outFile,names,temps,series_num,1)
+plot_overlay(outFile,names,temps,series_num,2)
+plot_overlay(outFile,names,temps,series_num,3)

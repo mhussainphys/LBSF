@@ -13,6 +13,6 @@ Instructions for running scan:
 
 
 Plotting results:
-1) Make new series text file or add entry to existing one in LBSF/Plotter/series/. Filename must be Series<seriesNum>.txt
+1) Make new series text file or add entry to existing one in LBSF/Plotter/series/. Filename must be SeriesN.txt
 2) python plot_bias_scan.py seriesNum
 3) Plots appear in plots directory.
